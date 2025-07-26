@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFT Collection</title>
+    <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/web3@1.7.4/dist/web3.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const contractABI = [
+            {
+                "inputs": [{"internalType": "string", "name": "_collectionId", "type": "string"}],
+                "name": "initializeCollection",
+                "outputs": [],
+                "stateMutability": "nonpayable",
+                "type": "function"
+            },
+            {
+                "inputs": [{"internalType": "address", "name": "recipient", "type": "address"}],
+                "name": "mintNFT",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "payable",
+                "type": "function"
+            },
+            {
+                "inputs": [{"internalType": "address", "name": "owner", "type": "address"}],
+                "name": "getMyNFTs",
+                "outputs": [{"internalType": "uint256[]", "name": "", "type": "uint256[]"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "collectionId",
+                "outputs": [{"internalType": "string", "name": "", "type": "string"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "isCollectionInitialized",
+                "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+                "stateMutability": "view",
+                "type": "function"
+            },
+            {
+                "inputs": [],
+                "name": "mintPrice",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ];
+
+        const contractAddress = "YOUR_CONTRACT_ADDRESS"; // Replace with your deployed contract address
+
+        function App() {
+            const [web3, setWeb3] = useState(null);
+            const [account, setAccount] = useState(null);
+            const [contract, setContract] = useState(null);
+            const [isCollectionInitialized, setIsCollectionInitialized] = useState(false);
+            const [collectionId, setCollectionId] = useState('');
+            const [mintPrice, setMintPrice] = useState('0');
+            const [ownedNFTs, setOwnedNFTs] = useState([]);
+            const [activeTab, setActiveTab] = useState('mint');
+            const [message, setMessage] = useState('');
+            const [newCollectionId, setNewCollectionId] = useState('');
+
+            useEffect(() => {
+                async function initWeb3() {
+                    if (window.ethereum) {
+                        const web3Instance = new Web3(window.ethereum);
+                        setWeb3(web3Instance);
+                        try {
+                            await window.ethereum.request({ method: 'eth_requestAccounts' });
+                            const accounts = await web3Instance.eth.getAccounts();
+                            setAccount(accounts[0]);
+
+                            const contractInstance = new web3Instance.eth.Contract(contractABI, contractAddress);
+                            setContract(contractInstance);
+
+                            const initialized = await contractInstance.methods.isCollectionInitialized().call();
+                            setIsCollectionInitialized(initialized);
+
+                            if (initialized) {
+                                const id = await contractInstance.methods.collectionId().call();
+                                setCollectionId(id);
+                            } else {
+                                setMessage('Collection ID not generated. You can still mint NFTs.');
+                            }
+
+                            const price = await contractInstance.methods.mintPrice().call();
+                            setMintPrice(web3Instance.utils.fromWei(price, 'ether'));
+
+                            if (accounts[0]) {
+                                const nfts = await contractInstance.methods.getMyNFTs(accounts[0]).call();
+                                setOwnedNFTs(nfts);
+                            }
+                        } catch (error) {
+                            console.error('Error initializing Web3:', error);
+                            setMessage('Failed to connect to wallet. Please try again.');
+                        }
+                    } else {
+                        setMessage('Please install MetaMask to use this dApp.');
+                    }
+                }
+                initWeb3();
+            }, []);
+
+            const validateCollectionId = (id) => {
+                // Basic validation: ensure ID is non-empty and contains only alphanumeric characters
+                return /^[a-zA-Z0-9]+$/.test(id) && id.length > 0;
+            };
+
+            const handleInitializeCollection = async () => {
+                if (!contract || !account) {
+                    setMessage('Please connect your wallet first.');
+                    return;
+                }
+
+                if (!validateCollectionId(newCollectionId)) {
+                    setMessage('Invalid Collection ID. Use only alphanumeric characters.');
+                    return;
+                }
+
+                try {
+                    setMessage('Initializing collection...');
+                    await contract.methods.initializeCollection(newCollectionId).send({ from: account });
+                    setIsCollectionInitialized(true);
+                    setCollectionId(newCollectionId);
+                    setMessage('Collection initialized successfully!');
+                } catch (error) {
+                    console.error('Collection initialization error:', error);
+                    setMessage(`Collection creation failed: ${error.message.includes('Invalid') ? 'Invalid Collection ID' : error.message}`);
+                }
+            };
+
+            const handleMint = async () => {
+                if (!contract || !account) {
+                    setMessage('Please connect your wallet first.');
+                    return;
+                }
+
+                try {
+                    setMessage('Minting in progress...');
+                    const priceInWei = web3.utils.toWei(mintPrice, 'ether');
+                    await contract.methods.mintNFT(account).send({
+                        from: account,
+                        value: priceInWei
+                    });
+                    setMessage('NFT minted successfully!');
+                    
+                    // Refresh owned NFTs
+                    const nfts = await contract.methods.getMyNFTs(account).call();
+                    setOwnedNFTs(nfts);
+                } catch (error) {
+                    console.error('Minting error:', error);
+                    setMessage('Failed to mint NFT. Please try again.');
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-100 p-4">
+                    <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6">
+                        <h1 className="text-2xl font-bold mb-4 text-center">NFT Collection</h1>
+                        
+                        {account ? (
+                            <p className="text-sm text-gray-600 mb-4">Connected: {account.slice(0, 6)}...{account.slice(-4)}</p>
+                        ) : (
+                            <p className="text-sm text-red-600 mb-4">Please connect your wallet</p>
+                        )}
+
+                        <div className="flex mb-4">
+                            <button
+                                className={`flex-1 py-2 ${activeTab === 'mint' ? 'bg-blue-500 text-white' : 'bg-gray-200'} rounded-l-lg`}
+                                onClick={() => setActiveTab('mint')}
+                            >
+                                Mint NFT
+                            </button>
+                            <button
+                                className={`flex-1 py-2 ${activeTab === 'my-nfts' ? 'bg-blue-500 text-white' : 'bg-gray-200'} rounded-r-lg`}
+                                onClick={() => setActiveTab('my-nfts')}
+                            >
+                                My NFTs
+                            </button>
+                        </div>
+
+                        {activeTab === 'mint' && (
+                            <div>
+                                {!isCollectionInitialized && (
+                                    <div className="mb-4">
+                                        <h2 className="text-lg font-semibold mb-2">Initialize Collection</h2>
+                                        <input
+                                            type="text"
+                                            value={newCollectionId}
+                                            onChange={(e) => setNewCollectionId(e.target.value)}
+                                            placeholder="Enter Collection ID (alphanumeric)"
+                                            className="w-full p-2 border rounded-lg mb-2"
+                                        />
+                                        <button
+                                            className="w-full bg-green-500 text-white py-2 rounded-lg hover:bg-green-600"
+                                            onClick={handleInitializeCollection}
+                                            disabled={!account}
+                                        >
+                                            Initialize Collection
+                                        </button>
+                                    </div>
+                                )}
+                                <div className="bg-yellow-100 border-l-4 border-yellow-500 p-4 mb-4">
+                                    <p className="text-yellow-700">
+                                        {isCollectionInitialized
+                                            ? `Collection ID: ${collectionId}`
+                                            : 'Collection ID not generated. You can still mint NFTs.'}
+                                    </p>
+                                </div>
+                                <div className="mb-4">
+                                    <p className="text-lg">Mint Price: {mintPrice} ETH</p>
+                                    <button
+                                        className="mt-2 w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600"
+                                        onClick={handleMint}
+                                        disabled={!account}
+                                    >
+                                        Mint NFT
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'my-nfts' && (
+                            <div>
+                                <h2 className="text-xl font-semibold mb-2">My NFTs</h2>
+                                {ownedNFTs.length > 0 ? (
+                                    <ul className="grid grid-cols-1 gap-4">
+                                        {ownedNFTs.map((nftId) => (
+                                            <li key={nftId} className="bg-gray-50 p-4 rounded-lg">
+                                                NFT ID: {nftId}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                ) : (
+                                    <p className="text-gray-600">You don't own any NFTs yet.</p>
+                                )}
+                            </div>
+                        )}
+
+                        {message && (
+                            <div className={`mt-4 p-4 rounded-lg ${message.includes('success') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                {message}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
